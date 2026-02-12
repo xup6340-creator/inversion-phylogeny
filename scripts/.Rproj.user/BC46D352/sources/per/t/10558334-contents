@@ -1,0 +1,273 @@
+---
+title: "Untitled"
+author: "Peng Xu"
+date: "2025-04-08"
+output: html_document
+---
+
+```{r}
+matrix <- as.matrix(read.csv("C:/Users/IsLoy_Ang/Desktop/math/tree3.csv", row.names = 1))
+data_c <- phyDat(matrix, type = "USER", levels = c(0, 1))
+
+dist_matrix <- dist.hamming(data_c)
+tree_c <- NJ(dist_matrix)
+plot(tree_c, main = "Phylogenetic Tree")
+
+tree_paper <- "((Gm,Gt),((XLZ7,(ZMS24,NDM8)),(Gd,(Tanguis,(Xinhai21,(Hai7124,(Pima90,3-79)))))));"
+tree_c1 <- read.tree(text = tree_paper)
+plot(tree_c1, main = "Phylogenetic Tree1")
+```
+```{r}
+score_cal <- function(tree_c, matrix) {
+  n_cols <- ncol(matrix)
+  score <- numeric(n_cols)
+  for (i in seq_len(n_cols)) {
+    single_col <- matrix[, i, drop = FALSE]
+    single_data <- phyDat(single_col, type = "USER", levels = c(0, 1))
+    score[i] <- parsimony(tree_c, single_data, method = "fitch")
+  }
+  return(score)
+}
+
+score <- score_cal(tree_c, matrix)
+score1 <- score_cal(tree_c1, matrix)
+
+score
+score1
+
+```
+```{r}
+bia <- lapply(prop.part(tree_c), function(part) {
+  sort(tree_c$tip.label[unlist(part)])
+})
+bia <- Filter(function(x) length(x) < length(tree_c$tip.label), bia)
+bia_str <- sapply(bia, paste, collapse = "|")
+
+bia1 <- lapply(prop.part(tree_c1), function(part) {
+  sort(tree_c1$tip.label[unlist(part)])
+})
+bia1 <- Filter(function(x) length(x) < length(tree_c1$tip.label), bia1)
+bia1_str <- sapply(bia1, paste, collapse = "|")
+
+cat("Bipartitions in my NJ tree:\n")
+for (i in seq_along(bia)) {
+  cat("Data Bipartition", i, ":", paste(bia[[i]], collapse = ", "), "\n")
+}
+
+cat("\nBipartitions in paper tree:\n")
+for (i in seq_along(bia1)) {
+  cat("Paper Bipartition", i, ":", paste(bia1[[i]], collapse = ", "), "\n")
+}
+
+# Compare
+common <- intersect(bia_str, bia1_str)
+
+cat("\nNumber of shared bipartitions:", length(common), "\n")
+cat("Shared bipartitions:\n")
+for (b in common) {
+  cat("- ", gsub("\\|", ", ", b), "\n")
+}
+```
+```{r}
+library(phangorn)
+mast_result <- mast(tree_c, tree_c1)
+plot(mast_result, main = "MAST")
+
+```
+```{r}
+load <- function(filepath) {
+  data <- read.csv(filepath, header = TRUE, stringsAsFactors = FALSE)
+  data <- as.data.frame(lapply(data, function(x) {
+    x <- suppressWarnings(as.numeric(as.character(x)))
+    x[is.na(x)] <- 0
+    return(x)
+  }))
+  return(data)
+}
+
+clean <- function(mat) {
+  mat <- mat[rowSums(mat, na.rm = TRUE) > 0, , drop = FALSE]
+  mat <- mat[!duplicated(mat), , drop = FALSE]
+  if (nrow(mat) < 4) return(NULL)
+  if (is.null(rownames(mat))) rownames(mat) <- paste0("sp", seq_len(nrow(mat)))
+  repeat {
+    phy <- try(phyDat(mat, type = "USER", levels = c(0, 1)), silent = TRUE)
+    if (inherits(phy, "try-error")) return(NULL)
+    dist_mat <- try(as.matrix(dist.hamming(phy)), silent = TRUE)
+    if (inherits(dist_mat, "try-error")) return(NULL)
+    na_rows <- unique(rownames(dist_mat)[rowSums(is.na(dist_mat)) > 0])
+    if (length(na_rows) == 0) break
+    mat <- mat[!rownames(mat) %in% na_rows, , drop = FALSE]
+    if (nrow(mat) < 4) return(NULL)
+  }
+  return(mat)
+}
+
+randomize_matrix <- function(data) {
+  randomized <- matrix(0, nrow = nrow(data), ncol = ncol(data))
+  for (r in seq_len(nrow(data))) {
+    ones <- sum(data[r, ] == 1)
+    if (ones > 0 && ones <= ncol(data)) randomized[r, sample(ncol(data), ones)] <- 1
+  }
+  colnames(randomized) <- colnames(data)
+  rownames(randomized) <- rownames(data)
+  return(randomized)
+}
+
+bipartitions <- function(mat) {
+  if (is.null(mat)) return(character(0))
+  phy <- try(phyDat(mat, type = "USER", levels = c(0, 1)), silent = TRUE)
+  if (inherits(phy, "try-error")) return(character(0))
+  tree <- try(NJ(dist.hamming(phy)), silent = TRUE)
+  if (inherits(tree, "try-error")) return(character(0))
+  bip <- prop.part(tree)
+  bip <- bip[sapply(bip, length) < length(tree$tip.label)]
+  sapply(bip, function(part) paste(sort(tree$tip.label[unlist(part)]), collapse = "|"))
+}
+
+
+data <- load("C:/Users/IsLoy_Ang/Desktop/math/tree3.csv")
+data_t <- clean(t(data))
+data_phy <- phyDat(data_t, type = "USER", levels = c(0, 1))
+tree_orig <- NJ(dist.hamming(data_phy))
+bip_orig <- bipartitions(data_t)
+
+results <- vector("numeric", 100)  
+for (i in 1:100) {
+  randomized <- randomize_matrix(data)
+  rand_t <- clean(t(randomized))
+  bip_rand <- bipartitions(rand_t)
+  results[i] <- length(intersect(bip_orig, bip_rand))
+}
+
+valid_results <- results[!is.na(results)] 
+
+cat("Mean:", mean(valid_results), "\n")
+cat("SD:", sd(valid_results), "\n")
+cat("Min:", min(valid_results), "\n")
+cat("Max:", max(valid_results), "\n")
+```
+
+```{r}
+library(ape)
+library(phangorn)
+
+matrix <- as.matrix(read.csv("C:/Users/IsLoy_Ang/Desktop/math/tree3.csv", row.names = 1))
+matrix[is.na(matrix)] <- 0
+
+data_phy <- phyDat(matrix, type = "USER", levels = c(0, 1))
+tree_data <- NJ(dist.hamming(data_phy))
+tree_data <- midpoint(tree_data)
+
+safe_mast_size <- function(tree1, tree2) {
+  tryCatch({
+    m <- mast(tree1, tree2)
+    length(m$tip.label)
+  }, error = function(e) {
+    return(NA)
+  })
+}
+
+set.seed(42)
+n_iter <- 100
+mast_self <- numeric(n_iter)
+
+for (i in 1:n_iter) {
+  sampled_rows <- sample(1:nrow(matrix), size = nrow(matrix), replace = TRUE)
+  boot_matrix <- matrix[sampled_rows, , drop = FALSE]
+  rownames(boot_matrix) <- rownames(matrix)[sampled_rows]
+  
+  boot_phy <- phyDat(boot_matrix, type = "USER", levels = c(0, 1))
+  tree_boot <- NJ(dist.hamming(boot_phy))
+  tree_boot <- midpoint(tree_boot)
+  
+  common <- intersect(tree_boot$tip.label, tree_data$tip.label)
+  if (length(common) >= 4) {
+    mast_self[i] <- safe_mast_size(keep.tip(tree_boot, common),
+                                   keep.tip(tree_data, common))
+  } else {
+    mast_self[i] <- NA
+  }
+  
+  if (i %% 10 == 0) cat("Finished", i, "iterations\n")
+}
+
+valid_self <- mast_self[!is.na(mast_self)]
+
+cat("Bootstrap vs. my cotton tree:\n")
+cat("Mean:", mean(valid_self), "Min:", min(valid_self), "Max:", max(valid_self), "\n")
+
+hist(valid_self, col = "red", main = "MAST size vs. my cotton tree",
+     xlab = "Number of tips in MAST", breaks = 0:(max(valid_self)+1)-0.5)
+
+
+```
+```{r}
+library(phangorn)
+library(ape)
+library(ggplot2)
+library(dplyr)
+
+mat <- as.matrix(read.csv("C:/Users/IsLoy_Ang/Desktop/math/tree3.csv", row.names = 1))
+mat[mat != 0] <- 1  
+
+orig_phy <- phyDat(mat, type = "USER", levels = c(0, 1))
+orig_tree <- NJ(dist.hamming(orig_phy))
+
+paper_tree <- read.tree(text = "((Gm,Gt),((XLZ7,(ZMS24,NDM8)),(Gd,(Tanguis,(Xinhai21,(Hai7124,(Pima90,3-79)))))));")
+
+mast_size <- function(tree1, tree2) {
+  tryCatch({
+    m <- mast(tree1, tree2)
+    length(m$tip.label)
+  }, error = function(e) NA)
+}
+
+add_noise <- function(mat, n) {
+  zeros <- which(mat == 0)
+  if (length(zeros) == 0) return(mat)
+  n <- min(n, length(zeros))
+  mat[sample(zeros, n)] <- 1
+  return(mat)
+}
+
+set.seed(42)
+noise_levels <- seq(0, sum(mat == 0), by = 30)
+n_reps <- 10
+mast_data <- data.frame()
+
+for (noise_n in noise_levels) {
+  for (rep in 1:n_reps) {
+    noisy_mat <- add_noise(mat, noise_n)
+    noisy_phy <- phyDat(noisy_mat, type = "USER", levels = c(0, 1))
+    noisy_tree <- NJ(dist.hamming(noisy_phy))
+    common_tips <- intersect(noisy_tree$tip.label, orig_tree$tip.label)
+    if (length(common_tips) >= 4) {
+      mast_result <- mast_size(keep.tip(noisy_tree, common_tips), keep.tip(orig_tree, common_tips))
+      mast_data <- rbind(mast_data, data.frame(rep = rep, mast = mast_result, replaced = noise_n))
+    }
+  }
+  cat("Finished", noise_n, "changes\n")
+}
+
+ggplot(mast_summary, aes(replaced, mean_mast)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(x = "Number of 0 Replaced",
+       y = "Mean MAST Size",
+       title = "Mean MAST") +
+  theme_minimal(base_size = 13)
+
+mast_summary <- mast_data %>%
+  group_by(replaced) %>%
+  summarise(
+    mean_mast = mean(mast, na.rm = TRUE),
+    median_mast = median(mast, na.rm = TRUE),
+    sd = sd(mast, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(mast_summary)
+
+```
+
